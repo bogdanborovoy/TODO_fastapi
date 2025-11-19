@@ -1,12 +1,17 @@
+import json
 from typing import Annotated
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Path, HTTPException, status, Response, Depends
 from sqlmodel import Session, SQLModel, select
-from app.database import engine
+from database import engine
 
 from models import TaskRead, Task, TaskCreate, TaskUpdate
 
+from celery_worker import do_nothing
+from redis import Redis
+
+redis_client = Redis(host="redis", port=6379, db=0, decode_responses=True)
 
 def get_session():
     with Session(engine) as session:
@@ -31,9 +36,15 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/tasks/", response_model=list[TaskRead])
 def read_tasks(session: SessionDep):
+    cached_tasks = redis_client.get("all_tasks")
+    if cached_tasks:
+        return json.loads(cached_tasks)
+    do_nothing.delay()
     tasks = session.exec(select(Task)).all()
-    return tasks
 
+    tasks_json = json.dumps([t.model_dump() for t in tasks])
+    redis_client.setex("all_tasks", 30, tasks_json)
+    return tasks
 
 @app.get("/tasks/{task_id}", response_model=TaskRead)
 def read_task(task_id: Annotated[int, Path()], session: SessionDep):
@@ -49,6 +60,7 @@ def create_task(session: SessionDep, task: TaskCreate):
     session.add(task_db)
     session.commit()
     session.refresh(task_db)
+    redis_client.delete("all_tasks")
     return task_db
 
 
@@ -62,6 +74,7 @@ def replace_task(task_id: Annotated[int, Path()], new_task: TaskCreate, session:
 
     session.commit()
     session.refresh(task_db)
+    redis_client.delete("all_tasks")
     return task_db
 
 
@@ -75,6 +88,7 @@ def update_task(task_id: Annotated[int, Path()], new_task: TaskUpdate, session: 
 
     session.commit()
     session.refresh(task_db)
+    redis_client.delete("all_tasks")
     return task_db
 
 
@@ -85,4 +99,5 @@ def delete_task(task_id: Annotated[int, Path()], session: SessionDep):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     session.delete(task_db)
     session.commit()
+    redis_client.delete("all_tasks")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
