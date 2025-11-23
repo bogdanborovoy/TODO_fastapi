@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Path, HTTPException, status, Response, Depends
 from sqlmodel import Session, SQLModel, select
 from database import engine
-
+from fastapi.middleware.cors import CORSMiddleware
 from models import TaskRead, Task, TaskCreate, TaskUpdate
 
 from celery_worker import do_nothing
@@ -32,6 +32,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 
 @app.get("/tasks/", response_model=list[TaskRead])

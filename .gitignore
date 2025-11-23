@@ -1,5 +1,5 @@
 /.venv
 /.idea
-/app/__pycache__
+/backend/app/__pycache__
 .env
 .DS_Store
